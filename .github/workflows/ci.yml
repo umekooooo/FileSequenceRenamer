@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# このワークフローでは、以下のリポジトリ構成を前提とします。
+#
+# .
+# ├── <ソリューション名>.slnx
+# ├── src/
+# │   ├── <プロジェクト名>/
+# │   │   └── <プロジェクト名>.csproj
+# │   └── ...
+# └── tests/
+#     ├── <テストプロジェクト名>/
+#     │   └── <テストプロジェクト名>.csproj
+#     └── ...
+#
+# ・ソリューションファイルはリポジトリのルートに1つ配置します。
+# ・メインプロダクトのプロジェクトは src/ 以下に配置します。
+# ・テストプロジェクトは tests/ 以下に配置します。
+#
+# なお、.slnx が存在しない場合はBuild/Testをスキップします。
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: ソリューションファイルを確認
+        id: solution
+        shell: pwsh
+        run: |
+          $solutions = @(Get-ChildItem -Path . -Filter *.slnx -File)
+
+          if ($solutions.Count -eq 0) {
+            Write-Host "ルートに.slnxファイルがないため、Build/Testをスキップします。"
+            "found=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          if ($solutions.Count -gt 1) {
+            throw "ルートに複数の.slnxファイルがあります。ソリューションファイルは1つにしてください。"
+          }
+
+          "found=true" >> $env:GITHUB_OUTPUT
+          "path=$($solutions[0].FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        if: steps.solution.outputs.found == 'true'
+        run: dotnet restore "${{ steps.solution.outputs.path }}"
+
+      - name: Build
+        if: steps.solution.outputs.found == 'true'
+        run: dotnet build "${{ steps.solution.outputs.path }}" --no-restore --configuration Release
+
+      - name: Test
+        if: steps.solution.outputs.found == 'true'
+        run: dotnet test "${{ steps.solution.outputs.path }}" --no-build --configuration Release
